@@ -131,13 +131,14 @@ def write_shortened_lca(
                         fields = entry[6].split(";")
                     if exclude_keywords:
                         # go check if you need to skip this line
+                        taxidd = fields[0].split(":")[0].strip("'").strip('"')
                         matching_keywords = [
-                            keyword
-                            for keyword in exclude_keywords
-                            if fields[0].split(":")[0].strip("'").strip('"') == keyword
+                            keyword for keyword in exclude_keywords if taxidd == keyword
                         ]
                         if len(matching_keywords) > 0:
                             continue  # this only checks the node the read is actually assigned to
+                    # note! we are skipping keywords BEFORE aggregation, which happens later. so you might still end up with a family-level line if you
+                    # specified that family in the "exclude keywords" list, for example if there was a species in the sample which was not itself in your "exclude keywords" list
                     # moving on
                     # now explicitly check if upto is in the line on its own (e.g. we see "family", not just "subfamily" - yes this can happen rarely and weirdly and we will not include them)
                     if any(
@@ -1854,14 +1855,14 @@ def parse_exclude_keywords(args):
             for kw in exclude_keywords
         ]  # strip quotes
 
-        formatted_keywords = []
+        # formatted_keywords = []
         # good to surround the digit-only tax ids with a :, so we don't accidentally hit substring tax ids
-        for keyword in exclude_keywords:
-            if keyword.isdigit():
-                keyword = f"{keyword}:"
-            formatted_keywords.append(keyword)
+        # for keyword in exclude_keywords:
+        #     if keyword.isdigit():
+        #         keyword = f"{keyword}:"
+        #     formatted_keywords.append(keyword)
 
-        return formatted_keywords
+        return exclude_keywords
     else:
         return []
 
