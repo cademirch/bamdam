@@ -3,20 +3,12 @@
 Simple tests for bamdam commands.
 """
 
-import pytest
 import argparse
-from pathlib import Path
 
 
 # Import the command functions directly from bamdam
 from bamdam.bamdam import (
     shrink,
-    compute,
-    extract,
-    plotdamage,
-    plotbaminfo,
-    combine,
-    krona,
 )
 
 

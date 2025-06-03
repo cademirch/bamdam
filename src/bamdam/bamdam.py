@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 
 # bamdam by Bianca De Sanctis, bddesanctis@gmail.com
-# last updated mar 18 2025
+# WORKING VERSION; last updated may 5 2025
+# since last git commit: added GC content and more averaging to the combine function, fixed ^Ms at ends of tsv file lines, added an empty lca error catch
 
 import sys
 import re
@@ -87,7 +88,11 @@ def find_lca_type(original_lca_path):
     with open(original_lca_path, "r") as file:
         for _ in range(lcaheaderlines):
             next(file)
-        firstline = next(file)
+        try:
+            firstline = next(file)
+        except StopIteration:
+            print("\nError: LCA file contains no data lines after header.")
+            sys.exit()
         line = firstline.split("\t")
         # line[1] is the first tax id in an ngslca-style format, and the full read in metadmg-style format.
         if ":" in line[1]:
@@ -137,8 +142,8 @@ def write_shortened_lca(
                         ]
                         if len(matching_keywords) > 0:
                             continue  # this only checks the node the read is actually assigned to
-                    # note! we are skipping keywords BEFORE aggregation, which happens later. so you might still end up with a family-level line if you
-                    # specified that family in the "exclude keywords" list, for example if there was a species in the sample which was not itself in your "exclude keywords" list
+                        # note! we are skipping keywords BEFORE aggregation, which happens later. so you might still end up with a family-level line if you
+                        # specified that family in the "exclude keywords" list, for example if there was a species in the sample which was not itself in your "exclude keywords" list
                     # moving on
                     # now explicitly check if upto is in the line on its own (e.g. we see "family", not just "subfamily" - yes this can happen rarely and weirdly and we will not include them)
                     if any(
@@ -241,10 +246,10 @@ def write_shortened_bam(
 
     if tqdm_imported:
         print(
-            f"Writing a filtered bam file (a progress bar will initiate once the bam header has been written)..."
+            "Writing a filtered bam file (a progress bar will initiate once the bam header has been written)..."
         )
     else:
-        print(f"Writing a filtered bam file...")
+        print("Writing a filtered bam file...")
 
     # go and get get header lines in the OUTPUT lca, not the input (it will be 0, but just in case I modify code in the future)
     lcaheaderlines = 0
@@ -255,11 +260,13 @@ def write_shortened_bam(
             lcaheaderlines += 1
     currentlcaline = lcaheaderlines
 
-    with pysam.AlignmentFile(
-        original_bam_path, "rb", check_sq=False, require_index=False
-    ) as infile, pysam.AlignmentFile(
-        short_bam_path, "wb", header=infile.header
-    ) as outfile, open(short_lca_path, "r") as shortlcafile:
+    with (
+        pysam.AlignmentFile(
+            original_bam_path, "rb", check_sq=False, require_index=False
+        ) as infile,
+        pysam.AlignmentFile(short_bam_path, "wb", header=infile.header) as outfile,
+        open(short_lca_path, "r") as shortlcafile,
+    ):
         for _ in range(lcaheaderlines):
             lcaline = next(shortlcafile)
 
@@ -365,7 +372,7 @@ def get_mismatches(seq, cigar, md):
         cat = x[-1]
         if cat == "H":  # doesn't consume reference or query
             print(
-                f"Warning: You have cigar strings have Hs in them (hard clipping). These specific reads may not be parsed correctly"
+                "Warning: You have cigar strings have Hs in them (hard clipping). These specific reads may not be parsed correctly"
             )
             continue
             # ! i've never actually seen these in a cigar string so i'm not 100% sure this works
@@ -735,7 +742,7 @@ def calculate_dust(seq):
     readlength = len(seq)
     if readlength < 3:
         print(
-            f"Warning: Cannot calculate dust score for a very short sequence (wait, why do you have reads this short?)"
+            "Warning: Cannot calculate dust score for a very short sequence (wait, why do you have reads this short?)"
         )
         return 0
 
@@ -797,7 +804,7 @@ def get_hll_info(seq, k):
                 rep_kmers.append(get_rep_kmer(kmer))
                 total_kmers += 1
     else:
-        print(f"Warning: One of your reads is shorter than k.")
+        print("Warning: One of your reads is shorter than k.")
     return rep_kmers, total_kmers
 
 
@@ -1002,7 +1009,7 @@ def gather_subs_and_kmers(bamfile_path, lcafile_path, kn, upto, stranded):
                             f"Error: Something weird has gone wrong. Cannot find node '{node}' in its supposed lca entry. Are there weird characters in your lca entries?"
                         )
                         print(f"The problematic line is {currentlcaline}")
-                        print(f"Will try to continue.")
+                        print("Will try to continue.")
 
                 # only at the end should you update total reads
                 node_data[node]["total_reads"] += 1
@@ -1219,10 +1226,18 @@ def parse_and_write_node_data(nodedata, tsv_path, subs_path, stranded, pmds_in_b
         ]
     statsfile.write("\t".join(header) + "\n")
     writer = csv.writer(
-        statsfile, delimiter="\t", quotechar='"', quoting=csv.QUOTE_NONNUMERIC
+        statsfile,
+        delimiter="\t",
+        quotechar='"',
+        quoting=csv.QUOTE_NONNUMERIC,
+        lineterminator="\n",
     )
     subswriter = csv.writer(
-        subsfile, delimiter="\t", quotechar='"', quoting=csv.QUOTE_NONE
+        subsfile,
+        delimiter="\t",
+        quotechar='"',
+        quoting=csv.QUOTE_NONE,
+        lineterminator="\n",
     )
 
     rows = []
@@ -1384,7 +1399,7 @@ def extract_reads(
             f"The most common reference is {most_common_reference} with {reference_count[most_common_reference]} alignments."
         )
         print(
-            f"Your output bam will contain all alignments to this reference, even if there is more than one per read."
+            "Your output bam will contain all alignments to this reference, even if there is more than one per read."
         )
         header["SQ"] = [
             sq for sq in header.get("SQ", []) if sq["SN"] == most_common_reference
@@ -1692,7 +1707,7 @@ def make_damage_plot(in_subs_list, in_subs, tax, plotfile, ymax=0):
 def make_baminfo_plot(in_bam, in_bam_list, plotfile):
     if matplotlib_imported == False:
         print(
-            f"Error: Cannot find matplotlib library for plotting. Try: pip install matplotlib"
+            "Error: Cannot find matplotlib library for plotting. Try: pip install matplotlib"
         )
         return
 
@@ -1858,9 +1873,9 @@ def parse_exclude_keywords(args):
         # formatted_keywords = []
         # good to surround the digit-only tax ids with a :, so we don't accidentally hit substring tax ids
         # for keyword in exclude_keywords:
-        #     if keyword.isdigit():
-        #         keyword = f"{keyword}:"
-        #     formatted_keywords.append(keyword)
+        #    if keyword.isdigit():
+        #        keyword = f"{keyword}:"
+        #    formatted_keywords.append(keyword)
 
         return exclude_keywords
     else:
@@ -1875,6 +1890,7 @@ def tsvs_to_matrix(parsed_data, output_file, include="all", minreads=50):
     include_duplicity = "duplicity" in include or "all" in include
     include_dust = "dust" in include or "all" in include
     include_taxpath = "taxpath" in include or "all" in include
+    include_gc = "gc" in include or "all" in include
 
     tax_data = {}
     for (
@@ -1894,6 +1910,10 @@ def tsvs_to_matrix(parsed_data, output_file, include="all", minreads=50):
                     "samples": {},
                     "TotalReads": 0,
                     "WeightedDamage": 0 if include_damage else None,
+                    "WeightedDust": 0 if include_dust else None,
+                    "WeightedDup": 0 if include_duplicity else None,
+                    "WeightedReadGC": 0 if include_gc else None,
+                    "WeightedRefGC": 0 if include_gc else None,
                     "WeightSum": 0,
                 }
 
@@ -1902,20 +1922,52 @@ def tsvs_to_matrix(parsed_data, output_file, include="all", minreads=50):
                 "damage": float(record[5]) if include_damage else None,
                 "duplicity": float(record[3]) if include_duplicity else None,
                 "dust": float(record[4]) if include_dust else None,
+                "avg_read_gc": float(record[9]) if include_gc else None,
+                "avg_ref_gc": float(record[10]) if include_gc else None,
             }
             tax_data[tax]["samples"][sample_name] = sample_data
             tax_data[tax]["TotalReads"] += sample_data["reads"]
+            tax_data[tax]["WeightSum"] += sample_data["reads"]
             if include_damage and sample_data["damage"] is not None:
                 tax_data[tax]["WeightedDamage"] += (
                     sample_data["damage"] * sample_data["reads"]
                 )
-            tax_data[tax]["WeightSum"] += sample_data["reads"]
+            if include_dust and sample_data["dust"] is not None:
+                tax_data[tax]["WeightedDust"] += (
+                    sample_data["dust"] * sample_data["reads"]
+                )
+            if include_duplicity and sample_data["duplicity"] is not None:
+                tax_data[tax]["WeightedDup"] += (
+                    sample_data["duplicity"] * sample_data["reads"]
+                )
+            if include_gc and sample_data["avg_read_gc"] is not None:
+                tax_data[tax]["WeightedReadGC"] += (
+                    sample_data["avg_read_gc"] * sample_data["reads"]
+                )
+            if include_gc and sample_data["avg_ref_gc"] is not None:
+                tax_data[tax]["WeightedRefGC"] += (
+                    sample_data["avg_ref_gc"] * sample_data["reads"]
+                )
 
     for tax, data in tax_data.items():
         if include_damage and data["WeightSum"] > 0:
             data["MeanDamage"] = data["WeightedDamage"] / data["WeightSum"]
         else:
             data["MeanDamage"] = "NA"
+        if include_dust and data["WeightSum"] > 0:
+            data["MeanDust"] = data["WeightedDust"] / data["WeightSum"]
+        else:
+            data["MeanDust"] = "NA"
+        if include_duplicity and data["WeightSum"] > 0:
+            data["MeanDup"] = data["WeightedDup"] / data["WeightSum"]
+        else:
+            data["MeanDup"] = "NA"
+        if include_gc and data["WeightSum"] > 0:
+            data["MeanReadGC"] = data["WeightedReadGC"] / data["WeightSum"]
+            data["MeanRefGC"] = data["WeightedRefGC"] / data["WeightSum"]
+        else:
+            data["MeanReadGC"] = "NA"
+            data["MeanRefGC"] = "NA"
 
     tax_data = {
         tax: data for tax, data in tax_data.items() if data["TotalReads"] >= minreads
@@ -1928,7 +1980,14 @@ def tsvs_to_matrix(parsed_data, output_file, include="all", minreads=50):
         header = ["Tax", "TotalReads"]
         if include_damage:
             header.append("MeanDamage")
-        for sample_name in sorted(list(parsed_data.keys())):
+        if include_duplicity:
+            header.append("MeanDup")
+        if include_dust:
+            header.append("MeanDust")
+        if include_gc:
+            header.append("MeanReadGC")
+            header.append("MeanRefGC")
+        for sample_name in sorted(parsed_data.keys()):
             if sample_name.endswith(".tsv"):
                 sample_name = sample_name.replace(".tsv", "")
             header.append(f"{sample_name}_reads")
@@ -1938,6 +1997,9 @@ def tsvs_to_matrix(parsed_data, output_file, include="all", minreads=50):
                 header.append(f"{sample_name}_duplicity")
             if include_dust:
                 header.append(f"{sample_name}_dust")
+            if include_gc:
+                header.append(f"{sample_name}_avgreadgc")
+                header.append(f"{sample_name}_avgrefgc")
         if include_taxpath:
             header.append("TaxPath")
         outfile.write("\t".join(header) + "\n")
@@ -1946,6 +2008,30 @@ def tsvs_to_matrix(parsed_data, output_file, include="all", minreads=50):
             row = [tax, str(data["TotalReads"])]
             if include_damage:
                 row.append(str(round(data["MeanDamage"], 3)))
+            if include_duplicity:
+                row.append(
+                    str(round(data["MeanDup"], 3))
+                    if isinstance(data["MeanDup"], float)
+                    else "NA"
+                )
+            if include_dust:
+                row.append(
+                    str(round(data["MeanDust"], 3))
+                    if isinstance(data["MeanDust"], float)
+                    else "NA"
+                )
+            if include_gc:
+                row.append(
+                    str(round(data["MeanReadGC"], 3))
+                    if isinstance(data["MeanReadGC"], float)
+                    else "NA"
+                )
+                row.append(
+                    str(round(data["MeanRefGC"], 3))
+                    if isinstance(data["MeanRefGC"], float)
+                    else "NA"
+                )
+
             for sample_name in sorted(parsed_data.keys()):
                 if sample_name.endswith(".tsv"):
                     sample_name = sample_name.replace(".tsv", "")
@@ -1967,6 +2053,17 @@ def tsvs_to_matrix(parsed_data, output_file, include="all", minreads=50):
                     row.append(
                         str(sample_data.get("dust"))
                         if sample_data.get("dust") is not None
+                        else "NA"
+                    )
+                if include_gc:
+                    row.append(
+                        str(sample_data.get("avg_read_gc"))
+                        if sample_data.get("avg_read_gc") is not None
+                        else "NA"
+                    )
+                    row.append(
+                        str(sample_data.get("avg_ref_gc"))
+                        if sample_data.get("avg_ref_gc") is not None
                         else "NA"
                     )
             if include_taxpath:
@@ -2054,7 +2151,7 @@ def make_krona_xml(in_tsv, in_tsv_files, out_xml, minreads, maxdamage):
         # the first thing to do is get the top level; the "upto" that was used
         taxpath_col = header.index("TaxPath") if "TaxPath" in header else -1
 
-        if not "toplevel" in locals():
+        if "toplevel" not in locals():
             # toplevel should be the same across tsv files!
             levels_found = set()
             for line in lines[1:]:
@@ -2636,9 +2733,9 @@ def main():
     parser_combine.add_argument(
         "--include",
         nargs="*",
-        choices=["damage", "duplicity", "dust", "taxpath", "all", "none"],
+        choices=["damage", "duplicity", "dust", "taxpath", "gc", "all", "none"],
         default=["all"],
-        help="Additional metrics to include in output file. Specify any combination of the first four, 'all', or 'none'. (default: all)",
+        help="Additional metrics to include in output file. Specify any combination of the options, 'all', or 'none'. Supports: damage, duplicity, dust, taxpath, gc (default: all)",
     )
     parser_combine.set_defaults(func=combine)
 
@@ -2707,11 +2804,11 @@ def main():
         parser.error(f"Input LCA path does not exist: {args.in_lca}")
     if hasattr(args, "upto") and args.upto == "clade":
         parser.error(
-            f"Clade is not a valid taxonomic level in bamdam because there can be multiple clades in one taxonomic path."
+            "Clade is not a valid taxonomic level in bamdam because there can be multiple clades in one taxonomic path."
         )
     if hasattr(args, "upto") and "sub" in args.upto:
         parser.error(
-            f"The taxonomic level cannot start with 'sub' (eg subfamily, subphylum) because this is inconsistently defined in taxonomy (not all species belong to a subfamily, but they all belong to a family)."
+            "The taxonomic level cannot start with 'sub' (eg subfamily, subphylum) because this is inconsistently defined in taxonomy (not all species belong to a subfamily, but they all belong to a family)."
         )
     if hasattr(args, "upto") and args.upto != args.upto.lower():
         parser.warning(
